@@ -361,13 +361,21 @@ class MedicalGuidelinesMCPServer:
                 logger.error(f"Error searching {domain}: {e}")
                 
         if not all_results:
-            return f"No medical guidelines found for '{query}' in the specified domains."
+            # Try a fallback search with broader terms
+            logger.info(f"No results found, trying fallback search for: {query}")
+            fallback_query = query.replace(" management", "").replace(" guidelines", "")
+            fallback_results = await self.search_medical_guidelines(fallback_query, domains, max_results)
+            if fallback_results and "No medical guidelines found" not in fallback_results:
+                return fallback_results
+            
+            return f"No medical guidelines found for '{query}' in the specified domains. Try searching for specific conditions like 'diabetes', 'hypertension', or 'fracture'."
             
         return "\n\n".join(all_results)
         
     async def search_duckduckgo(self, search_url: str) -> List[Dict[str, str]]:
         """Search DuckDuckGo for medical guidelines"""
         try:
+            logger.info(f"Searching DuckDuckGo: {search_url}")
             async with self.session.get(search_url) as response:
                 if response.status != 200:
                     raise Exception(f"Search failed with status {response.status}")
@@ -376,15 +384,25 @@ class MedicalGuidelinesMCPServer:
                 soup = BeautifulSoup(html, 'html.parser')
                 
                 results = []
-                for result in soup.select('.result__a'):
-                    href = result.get('href')
-                    if href and href.startswith('http'):
-                        title = result.get_text(strip=True)
-                        results.append({
-                            'title': title,
-                            'url': href
-                        })
-                        
+                # Try different selectors for DuckDuckGo results
+                selectors = ['.result__a', '.result__title', 'a[href^="http"]', '.result']
+                
+                for selector in selectors:
+                    elements = soup.select(selector)
+                    for element in elements:
+                        href = element.get('href')
+                        if href and href.startswith('http'):
+                            title = element.get_text(strip=True)
+                            if title and len(title) > 10:  # Filter out very short titles
+                                results.append({
+                                    'title': title,
+                                    'url': href
+                                })
+                    
+                    if results:  # If we found results, break
+                        break
+                
+                logger.info(f"Found {len(results)} search results")
                 return results[:5]  # Limit to 5 results
                 
         except Exception as e:
