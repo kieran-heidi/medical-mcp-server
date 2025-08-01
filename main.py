@@ -219,28 +219,50 @@ class MedicalGuidelinesMCPServer:
         
         # Handle different parameter formats that Claude might send
         query = params.get('query', '')
-        if not query and isinstance(params, dict):
-            # Try to get query from the first argument if it's a string
-            for key, value in params.items():
-                if isinstance(value, str) and value.strip():
-                    query = value.strip()
-                    break
+        
+        # If query is the function name, try to get the actual query from arguments
+        if query == 'search_medical_guidelines' or not query:
+            # Look for the actual search query in the parameters
+            if isinstance(params, dict):
+                for key, value in params.items():
+                    if (isinstance(value, str) and value.strip() and 
+                        value.strip() != 'search_medical_guidelines' and
+                        key != 'query'):
+                        query = value.strip()
+                        logger.info(f"Found query in parameter '{key}': '{query}'")
+                        break
         
         domains = params.get('domains', [])
         max_results = params.get('max_results', 3)
         
         logger.info(f"Extracted query: '{query}', domains: {domains}, max_results: {max_results}")
         
-        if not query:
-            await self.send_sse_message(response, {
-                'jsonrpc': '2.0',
-                'id': message.get('id'),
-                'error': {
-                    'code': -32602,
-                    'message': 'Query parameter is required. Please provide a search query.'
-                }
-            })
-            return
+        # If we still don't have a valid query, check if there are any string arguments
+        if not query or query == 'search_medical_guidelines':
+            # Try to extract from the full message
+            full_message = str(message)
+            logger.info(f"Full message for debugging: {full_message}")
+            
+            # Try to find any string that could be a search query
+            search_terms = []
+            if isinstance(params, dict):
+                for key, value in params.items():
+                    if isinstance(value, str) and value.strip() and value.strip() != 'search_medical_guidelines':
+                        search_terms.append(value.strip())
+            
+            if search_terms:
+                query = search_terms[0]
+                logger.info(f"Using fallback query: '{query}'")
+            else:
+                await self.send_sse_message(response, {
+                    'jsonrpc': '2.0',
+                    'id': message.get('id'),
+                    'error': {
+                        'code': -32602,
+                        'message': 'Query parameter is required. Please provide a search query like "diabetes management" or "hypertension guidelines".'
+                    }
+                })
+                return
             
         try:
             # Start the search
