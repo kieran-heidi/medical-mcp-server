@@ -113,50 +113,79 @@ class MedicalGuidelinesMCPServer:
         
     async def sse_handler(self, request):
         """Handle MCP over SSE connections"""
-        response = web.StreamResponse(
-            status=200,
-            headers={
-                'Content-Type': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': '*',
-                'Access-Control-Allow-Methods': '*'
-            }
-        )
+        if request.method == 'POST':
+            # Handle POST requests (tool calls)
+            try:
+                data = await request.json()
+                logger.info(f"Received POST request: {json.dumps(data, indent=2)}")
+                
+                # Create a mock response for POST requests
+                response = web.StreamResponse(
+                    status=200,
+                    headers={
+                        'Content-Type': 'text/event-stream',
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Allow-Headers': '*',
+                        'Access-Control-Allow-Methods': '*'
+                    }
+                )
+                await response.prepare(request)
+                
+                await self.handle_mcp_message(data, response)
+                await response.write_eof()
+                
+            except Exception as e:
+                logger.error(f"Error handling POST request: {e}")
+                return web.json_response({'error': str(e)}, status=500)
         
-        await response.prepare(request)
-        
-        try:
-            # Handle incoming messages
-            async for line in request.content:
-                if line:
-                    try:
-                        line_text = line.decode('utf-8').strip()
-                        logger.info(f"Received SSE line: '{line_text}'")
-                        
-                        if line_text.startswith('data: '):
-                            # Extract JSON from SSE data format
-                            json_str = line_text[6:]  # Remove 'data: ' prefix
-                            data = json.loads(json_str)
-                        else:
-                            # Direct JSON
-                            data = json.loads(line_text)
-                        
-                        logger.info(f"Parsed JSON data: {json.dumps(data, indent=2)}")
-                        await self.handle_mcp_message(data, response)
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Invalid JSON received: {line} - Error: {e}")
-                    except Exception as e:
-                        logger.error(f"Error handling message: {e}")
-                        logger.error(f"Line content: {line}")
-                        
-        except asyncio.CancelledError:
-            logger.info("SSE connection cancelled")
-        except Exception as e:
-            logger.error(f"SSE handler error: {e}")
-        finally:
-            await self.cleanup_session()
+        else:
+            # Handle GET requests (SSE connection)
+            response = web.StreamResponse(
+                status=200,
+                headers={
+                    'Content-Type': 'text/event-stream',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': '*',
+                    'Access-Control-Allow-Methods': '*'
+                }
+            )
+            
+            await response.prepare(request)
+            
+            try:
+                # Handle incoming messages
+                async for line in request.content:
+                    if line:
+                        try:
+                            line_text = line.decode('utf-8').strip()
+                            logger.info(f"Received SSE line: '{line_text}'")
+                            
+                            if line_text.startswith('data: '):
+                                # Extract JSON from SSE data format
+                                json_str = line_text[6:]  # Remove 'data: ' prefix
+                                data = json.loads(json_str)
+                            else:
+                                # Direct JSON
+                                data = json.loads(line_text)
+                            
+                            logger.info(f"Parsed JSON data: {json.dumps(data, indent=2)}")
+                            await self.handle_mcp_message(data, response)
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Invalid JSON received: {line} - Error: {e}")
+                        except Exception as e:
+                            logger.error(f"Error handling message: {e}")
+                            logger.error(f"Line content: {line}")
+                            
+            except asyncio.CancelledError:
+                logger.info("SSE connection cancelled")
+            except Exception as e:
+                logger.error(f"SSE handler error: {e}")
+            finally:
+                await self.cleanup_session()
             
     async def send_sse_message(self, response, data):
         """Send SSE message"""
