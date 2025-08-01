@@ -215,9 +215,21 @@ class MedicalGuidelinesMCPServer:
     async def handle_tool_call(self, message, response):
         """Handle tool call for medical guidelines search"""
         params = message.get('params', {})
+        logger.info(f"Tool call params: {params}")
+        
+        # Handle different parameter formats that Claude might send
         query = params.get('query', '')
+        if not query and isinstance(params, dict):
+            # Try to get query from the first argument if it's a string
+            for key, value in params.items():
+                if isinstance(value, str) and value.strip():
+                    query = value.strip()
+                    break
+        
         domains = params.get('domains', [])
         max_results = params.get('max_results', 3)
+        
+        logger.info(f"Extracted query: '{query}', domains: {domains}, max_results: {max_results}")
         
         if not query:
             await self.send_sse_message(response, {
@@ -225,7 +237,7 @@ class MedicalGuidelinesMCPServer:
                 'id': message.get('id'),
                 'error': {
                     'code': -32602,
-                    'message': 'Query parameter is required'
+                    'message': 'Query parameter is required. Please provide a search query.'
                 }
             })
             return
