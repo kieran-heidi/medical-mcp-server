@@ -132,12 +132,24 @@ class MedicalGuidelinesMCPServer:
             async for line in request.content:
                 if line:
                     try:
-                        data = json.loads(line.decode('utf-8'))
+                        line_text = line.decode('utf-8').strip()
+                        logger.info(f"Received SSE line: '{line_text}'")
+                        
+                        if line_text.startswith('data: '):
+                            # Extract JSON from SSE data format
+                            json_str = line_text[6:]  # Remove 'data: ' prefix
+                            data = json.loads(json_str)
+                        else:
+                            # Direct JSON
+                            data = json.loads(line_text)
+                        
+                        logger.info(f"Parsed JSON data: {json.dumps(data, indent=2)}")
                         await self.handle_mcp_message(data, response)
-                    except json.JSONDecodeError:
-                        logger.warning(f"Invalid JSON received: {line}")
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid JSON received: {line} - Error: {e}")
                     except Exception as e:
                         logger.error(f"Error handling message: {e}")
+                        logger.error(f"Line content: {line}")
                         
         except asyncio.CancelledError:
             logger.info("SSE connection cancelled")
@@ -156,11 +168,16 @@ class MedicalGuidelinesMCPServer:
         method = message.get('method')
         message_id = message.get('id')
         
-        logger.info(f"Received MCP message: {method}")
+        logger.info(f"=== MCP MESSAGE DEBUG ===")
+        logger.info(f"Method: {method}")
+        logger.info(f"Message ID: {message_id}")
+        logger.info(f"Full message: {json.dumps(message, indent=2)}")
         
         if method == 'tools/call':
+            logger.info("Routing to tool call handler...")
             await self.handle_tool_call(message, response)
         elif method == 'initialize':
+            logger.info("Handling initialize message...")
             await self.send_sse_message(response, {
                 'jsonrpc': '2.0',
                 'id': message_id,
@@ -178,6 +195,7 @@ class MedicalGuidelinesMCPServer:
                 }
             })
         elif method == 'tools/list':
+            logger.info("Handling tools/list message...")
             await self.send_sse_message(response, {
                 'jsonrpc': '2.0',
                 'id': message_id,
@@ -211,20 +229,29 @@ class MedicalGuidelinesMCPServer:
             })
         else:
             logger.warning(f"Unknown MCP method: {method}")
+        
+        logger.info(f"=== END MCP MESSAGE DEBUG ===")
             
     async def handle_tool_call(self, message, response):
         """Handle tool call for medical guidelines search"""
+        logger.info(f"=== TOOL CALL DEBUG ===")
+        logger.info(f"Full message: {json.dumps(message, indent=2)}")
+        
         params = message.get('params', {})
-        logger.info(f"Tool call params: {params}")
+        logger.info(f"Raw params: {json.dumps(params, indent=2)}")
+        logger.info(f"Params type: {type(params)}")
         
         # Handle different parameter formats that Claude might send
         query = params.get('query', '')
+        logger.info(f"Direct query param: '{query}'")
         
         # If query is the function name, try to get the actual query from arguments
         if query == 'search_medical_guidelines' or not query:
+            logger.info("Query is function name or empty, searching for actual query...")
             # Look for the actual search query in the parameters
             if isinstance(params, dict):
                 for key, value in params.items():
+                    logger.info(f"Checking param '{key}': '{value}' (type: {type(value)})")
                     if (isinstance(value, str) and value.strip() and 
                         value.strip() != 'search_medical_guidelines' and
                         key != 'query'):
@@ -235,7 +262,8 @@ class MedicalGuidelinesMCPServer:
         domains = params.get('domains', [])
         max_results = params.get('max_results', 3)
         
-        logger.info(f"Extracted query: '{query}', domains: {domains}, max_results: {max_results}")
+        logger.info(f"Final extracted - query: '{query}', domains: {domains}, max_results: {max_results}")
+        logger.info(f"=== END TOOL CALL DEBUG ===")
         
         # If we still don't have a valid query, check if there are any string arguments
         if not query or query == 'search_medical_guidelines':
