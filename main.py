@@ -241,15 +241,26 @@ class MedicalGuidelinesMCPServer:
         logger.info(f"Raw params: {json.dumps(params, indent=2)}")
         logger.info(f"Params type: {type(params)}")
         
-        # Handle different parameter formats that Claude might send
-        query = params.get('query', '')
-        logger.info(f"Direct query param: '{query}'")
+        # MCP tool calls should have 'name' and 'arguments' in params
+        tool_name = params.get('name', '')
+        arguments = params.get('arguments', {})
         
-        # If query is the function name, try to get the actual query from arguments
-        if query == 'search_medical_guidelines' or not query:
-            logger.info("Query is function name or empty, searching for actual query...")
-            # Look for the actual search query in the parameters
-            if isinstance(params, dict):
+        logger.info(f"Tool name: '{tool_name}'")
+        logger.info(f"Arguments: {json.dumps(arguments, indent=2)}")
+        
+        # Extract query from arguments
+        query = arguments.get('query', '')
+        domains = arguments.get('domains', [])
+        max_results = arguments.get('max_results', 3)
+        
+        logger.info(f"Extracted from arguments - query: '{query}', domains: {domains}, max_results: {max_results}")
+        
+        # Fallback: if arguments is empty, try direct params
+        if not query and isinstance(params, dict):
+            logger.info("No query in arguments, trying direct params...")
+            query = params.get('query', '')
+            if not query:
+                # Look for any string that could be a query
                 for key, value in params.items():
                     logger.info(f"Checking param '{key}': '{value}' (type: {type(value)})")
                     if (isinstance(value, str) and value.strip() and 
@@ -258,9 +269,6 @@ class MedicalGuidelinesMCPServer:
                         query = value.strip()
                         logger.info(f"Found query in parameter '{key}': '{query}'")
                         break
-        
-        domains = params.get('domains', [])
-        max_results = params.get('max_results', 3)
         
         logger.info(f"Final extracted - query: '{query}', domains: {domains}, max_results: {max_results}")
         logger.info(f"=== END TOOL CALL DEBUG ===")
