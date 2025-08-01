@@ -263,6 +263,22 @@ class MedicalGuidelinesMCPServer:
                     }
                 })
                 return
+        
+        # Preprocess the query to handle complex medical queries
+        original_query = query
+        query = self.preprocess_medical_query(query)
+        logger.info(f"Original query: '{original_query}' -> Processed query: '{query}'")
+        
+        if not query:
+            await self.send_sse_message(response, {
+                'jsonrpc': '2.0',
+                'id': message.get('id'),
+                'error': {
+                    'code': -32602,
+                    'message': 'Could not extract medical condition from query. Try: "diabetes management", "hypertension guidelines", "fracture treatment".'
+                }
+            })
+            return
             
         try:
             # Start the search
@@ -498,6 +514,73 @@ class MedicalGuidelinesMCPServer:
             
         return text
         
+    def preprocess_medical_query(self, user_input: str) -> str:
+        """Extract medical terms and format for guidelines search"""
+        if not user_input:
+            return ""
+        
+        # Convert to lowercase for processing
+        text = user_input.lower().strip()
+        
+        # Remove common prefixes and modifiers
+        prefixes_to_remove = [
+            "nice", "guidelines", "management", "treatment", "recommendations",
+            "search for", "find", "get", "show me", "look for"
+        ]
+        
+        for prefix in prefixes_to_remove:
+            text = text.replace(prefix, "").strip()
+        
+        # Extract medical conditions
+        medical_conditions = self.extract_medical_conditions(text)
+        
+        if medical_conditions:
+            # Use the first found condition with "management" suffix
+            primary_condition = medical_conditions[0]
+            return f"{primary_condition} management"
+        
+        # If no specific condition found, try to extract key medical terms
+        medical_keywords = [
+            "diabetes", "hypertension", "fracture", "pneumonia", "asthma", 
+            "copd", "stroke", "heart", "cancer", "depression", "anxiety",
+            "obesity", "arthritis", "osteoporosis", "dementia", "epilepsy"
+        ]
+        
+        for keyword in medical_keywords:
+            if keyword in text:
+                return f"{keyword} management"
+        
+        return ""
+    
+    def extract_medical_conditions(self, text: str) -> List[str]:
+        """Extract medical conditions from text"""
+        # Common medical conditions and their variations
+        medical_conditions = {
+            "hip fracture": ["hip fracture", "fractured hip", "hip break"],
+            "diabetes": ["diabetes", "diabetic", "type 1 diabetes", "type 2 diabetes"],
+            "hypertension": ["hypertension", "high blood pressure", "htn"],
+            "pneumonia": ["pneumonia", "lung infection"],
+            "asthma": ["asthma", "asthmatic"],
+            "copd": ["copd", "chronic obstructive pulmonary disease"],
+            "stroke": ["stroke", "cerebrovascular accident", "cva"],
+            "heart failure": ["heart failure", "cardiac failure", "chf"],
+            "depression": ["depression", "major depressive disorder", "mdd"],
+            "anxiety": ["anxiety", "anxiety disorder", "generalized anxiety"],
+            "obesity": ["obesity", "overweight", "bmi"],
+            "arthritis": ["arthritis", "rheumatoid arthritis", "osteoarthritis"],
+            "osteoporosis": ["osteoporosis", "bone loss", "fragile bones"]
+        }
+        
+        found_conditions = []
+        
+        for condition, variations in medical_conditions.items():
+            for variation in variations:
+                if variation in text:
+                    found_conditions.append(condition)
+                    break
+        
+        return found_conditions
+    
     def format_guideline_result(self, title: str, domain: str, url: str, content: str) -> str:
         """Format guideline result for output"""
         domain_name = MEDICAL_DOMAINS[domain]['name']
