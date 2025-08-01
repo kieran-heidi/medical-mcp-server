@@ -128,24 +128,6 @@ class MedicalGuidelinesMCPServer:
         await response.prepare(request)
         
         try:
-            # Send initial connection message
-            await self.send_sse_message(response, {
-                'jsonrpc': '2.0',
-                'id': None,
-                'result': {
-                    'protocolVersion': '2024-11-05',
-                    'capabilities': {
-                        'tools': {
-                            'listChanged': False
-                        }
-                    },
-                    'serverInfo': {
-                        'name': 'medical-guidelines-mcp',
-                        'version': '1.0.0'
-                    }
-                }
-            })
-            
             # Handle incoming messages
             async for line in request.content:
                 if line:
@@ -171,12 +153,17 @@ class MedicalGuidelinesMCPServer:
         
     async def handle_mcp_message(self, message, response):
         """Handle MCP protocol messages"""
-        if message.get('method') == 'tools/call':
+        method = message.get('method')
+        message_id = message.get('id')
+        
+        logger.info(f"Received MCP message: {method}")
+        
+        if method == 'tools/call':
             await self.handle_tool_call(message, response)
-        elif message.get('method') == 'initialize':
+        elif method == 'initialize':
             await self.send_sse_message(response, {
                 'jsonrpc': '2.0',
-                'id': message.get('id'),
+                'id': message_id,
                 'result': {
                     'protocolVersion': '2024-11-05',
                     'capabilities': {
@@ -190,10 +177,10 @@ class MedicalGuidelinesMCPServer:
                     }
                 }
             })
-        elif message.get('method') == 'tools/list':
+        elif method == 'tools/list':
             await self.send_sse_message(response, {
                 'jsonrpc': '2.0',
-                'id': message.get('id'),
+                'id': message_id,
                 'result': {
                     'tools': [{
                         'name': 'search_medical_guidelines',
@@ -222,6 +209,8 @@ class MedicalGuidelinesMCPServer:
                     }]
                 }
             })
+        else:
+            logger.warning(f"Unknown MCP method: {method}")
             
     async def handle_tool_call(self, message, response):
         """Handle tool call for medical guidelines search"""
