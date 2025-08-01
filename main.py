@@ -331,8 +331,15 @@ class MedicalGuidelinesMCPServer:
         
         # Preprocess the query to handle complex medical queries
         original_query = query
-        query = self.preprocess_medical_query(query)
-        logger.info(f"Original query: '{original_query}' -> Processed query: '{query}'")
+        processed_query, extracted_domains = self.preprocess_medical_query(query)
+        
+        # Use extracted domains if none were provided
+        if not domains and extracted_domains:
+            domains = extracted_domains
+            logger.info(f"Using extracted domains: {domains}")
+        
+        query = processed_query
+        logger.info(f"Original query: '{original_query}' -> Processed query: '{query}' with domains: {domains}")
         
         if not query:
             await self.send_sse_message(response, {
@@ -597,30 +604,46 @@ class MedicalGuidelinesMCPServer:
             
         return text
         
-    def preprocess_medical_query(self, user_input: str) -> str:
-        """Extract medical terms and format for guidelines search"""
+    def preprocess_medical_query(self, user_input: str) -> tuple[str, list[str]]:
+        """Extract medical terms and format for guidelines search, return (query, domains)"""
         if not user_input:
-            return ""
+            return "", []
         
         # Convert to lowercase for processing
         text = user_input.lower().strip()
+        original_text = user_input.strip()
         
-        # Remove common prefixes and modifiers
-        prefixes_to_remove = [
-            "nice", "guidelines", "management", "treatment", "recommendations",
-            "search for", "find", "get", "show me", "look for"
-        ]
+        logger.info(f"Preprocessing query: '{original_text}'")
         
-        for prefix in prefixes_to_remove:
-            text = text.replace(prefix, "").strip()
+        # Extract domain preferences
+        domains = []
+        if "nice" in text:
+            domains.append("nice.org.uk")
+        if "racgp" in text or "australian" in text:
+            domains.append("racgp.org.au")
+        if "who" in text or "world health" in text:
+            domains.append("who.int")
+        if "cdc" in text or "centers for disease" in text:
+            domains.append("cdc.gov")
         
-        # Extract medical conditions
-        medical_conditions = self.extract_medical_conditions(text)
+        # Extract medical conditions with context
+        medical_conditions = self.extract_medical_conditions_with_context(text)
         
         if medical_conditions:
-            # Use the first found condition with "management" suffix
+            # Use the first found condition with appropriate suffix
             primary_condition = medical_conditions[0]
-            return f"{primary_condition} management"
+            
+            # Determine the appropriate suffix based on context
+            if "guidelines" in text or "recommendations" in text:
+                suffix = "guidelines"
+            elif "treatment" in text:
+                suffix = "treatment"
+            else:
+                suffix = "management"  # default
+            
+            query = f"{primary_condition} {suffix}"
+            logger.info(f"Extracted query: '{query}' with domains: {domains}")
+            return query, domains
         
         # If no specific condition found, try to extract key medical terms
         medical_keywords = [
@@ -631,9 +654,62 @@ class MedicalGuidelinesMCPServer:
         
         for keyword in medical_keywords:
             if keyword in text:
-                return f"{keyword} management"
+                suffix = "guidelines" if "guidelines" in text else "management"
+                query = f"{keyword} {suffix}"
+                logger.info(f"Extracted query: '{query}' with domains: {domains}")
+                return query, domains
         
-        return ""
+        return "", domains
+    
+    def extract_medical_conditions_with_context(self, text: str) -> List[str]:
+        """Extract medical conditions from text with better context handling"""
+        # Common medical conditions and their variations
+        medical_conditions = {
+            "hip fracture": ["hip fracture", "fractured hip", "hip break", "fracture of hip"],
+            "femur fracture": ["femur fracture", "thigh fracture", "femoral fracture"],
+            "ankle fracture": ["ankle fracture", "broken ankle"],
+            "wrist fracture": ["wrist fracture", "broken wrist"],
+            "diabetes": ["diabetes", "diabetic", "type 1 diabetes", "type 2 diabetes", "diabetes mellitus"],
+            "hypertension": ["hypertension", "high blood pressure", "htn", "hypertensive"],
+            "pneumonia": ["pneumonia", "lung infection", "pneumonic"],
+            "asthma": ["asthma", "asthmatic", "bronchial asthma"],
+            "copd": ["copd", "chronic obstructive pulmonary disease", "emphysema"],
+            "stroke": ["stroke", "cerebrovascular accident", "cva", "brain attack"],
+            "heart failure": ["heart failure", "cardiac failure", "chf", "congestive heart failure"],
+            "depression": ["depression", "major depressive disorder", "mdd", "clinical depression"],
+            "anxiety": ["anxiety", "anxiety disorder", "generalized anxiety", "panic disorder"],
+            "obesity": ["obesity", "overweight", "bmi", "morbid obesity"],
+            "arthritis": ["arthritis", "rheumatoid arthritis", "osteoarthritis", "joint inflammation"],
+            "osteoporosis": ["osteoporosis", "bone loss", "fragile bones", "bone thinning"],
+            "dementia": ["dementia", "alzheimer", "cognitive decline"],
+            "epilepsy": ["epilepsy", "seizure disorder", "epileptic"],
+            "cancer": ["cancer", "malignancy", "tumor", "neoplasm"],
+            "diabetes management": ["diabetes management", "diabetic care", "diabetes treatment"],
+            "hypertension management": ["hypertension management", "blood pressure management"],
+            "fracture management": ["fracture management", "bone fracture treatment"]
+        }
+        
+        found_conditions = []
+        
+        # First, try to find complete phrases (like "diabetes management")
+        for condition, variations in medical_conditions.items():
+            for variation in variations:
+                if variation in text:
+                    found_conditions.append(condition)
+                    break
+        
+        # If no complete phrases found, try to find individual conditions
+        if not found_conditions:
+            for condition, variations in medical_conditions.items():
+                # Skip conditions that are already phrases
+                if " " in condition:
+                    continue
+                for variation in variations:
+                    if variation in text and len(variation.split()) == 1:  # Single word conditions
+                        found_conditions.append(condition)
+                        break
+        
+        return found_conditions
     
     def extract_medical_conditions(self, text: str) -> List[str]:
         """Extract medical conditions from text"""
